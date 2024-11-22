@@ -1,0 +1,12 @@
+[
+  {
+    "role": "user",
+    "content": "salut",
+    "timestamp": "2024-11-22T16:27:28.607867"
+  },
+  {
+    "role": "assistant",
+    "content": "Bonjour! *bow* How may I assist you today?",
+    "timestamp": "2024-11-22T16:27:28.607881"
+  }
+]

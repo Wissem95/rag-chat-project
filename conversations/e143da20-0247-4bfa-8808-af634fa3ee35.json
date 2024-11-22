@@ -1,0 +1,12 @@
+[
+  {
+    "role": "user",
+    "content": "parle moi en francais ",
+    "timestamp": "2024-11-22T16:30:52.202830"
+  },
+  {
+    "role": "assistant",
+    "content": "Bonjour! Je suis heureux de parler avec vous en français. Pouvez-vous me dire comment je peux vous aider ?",
+    "timestamp": "2024-11-22T16:30:52.202852"
+  }
+]

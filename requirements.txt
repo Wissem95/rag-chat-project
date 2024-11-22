@@ -1,0 +1,5 @@
+langchain
+chromadb
+pyminio  # Pour MinIO
+ollama
+python-dotenv
