@@ -4,11 +4,19 @@ from typing import Optional, List
 import logging
 from src.rag.conversation_store import ConversationStore
 from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from langchain.chains import ConversationalRetrievalChain
+from src.rag.document_loader import DocumentLoader
+from src.rag.vector_store import VectorStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Créer les embeddings
+embeddings = OllamaEmbeddings(
+    model="llama2",
+    base_url="http://localhost:11434"
+)
 
 class ChatRequest(BaseModel):
     message: str
@@ -20,70 +28,52 @@ class ChatRequest(BaseModel):
 @router.post("/chat/")
 async def chat(request: ChatRequest):
     try:
-        # Initialiser Ollama
-        llm = Ollama(
+        llm = OllamaLLM(
             model="llama2",
             base_url="http://localhost:11434",
-            temperature=request.temperature
+            temperature=0.3
         )
-
-        # Créer ou récupérer la conversation
-        conversation_store = ConversationStore()
-        conversation = conversation_store.get_or_create_conversation(request.conversation_id)
-        
-        # Formater l'historique pour le contexte
-        chat_history = "\n".join([
-            f"{'Assistant' if msg['role'] == 'assistant' else 'Human'}: {msg['content']}"
-            for msg in conversation.messages
-        ])
-        
-        # Préparer le prompt avec l'historique
-        full_prompt = f"{chat_history}\nHuman: {request.message}\nAssistant:"
 
         if request.use_rag and request.documents:
-            # Utiliser RAG seulement si demandé et documents fournis
-            embeddings = OllamaEmbeddings(
-                model="llama2",
-                base_url="http://localhost:11434"
-            )
+            document_loader = DocumentLoader()
+            documents = await document_loader.load_documents(request.documents)
             
-            from src.rag.vector_store import VectorStore
-            vector_store = VectorStore(embeddings)
-            vector_store.add_documents(request.documents)
+            if not documents:
+                return {"response": "Aucun document valide n'a été trouvé."}
+
+            # Extraction du contenu avec plus de détails
+            document_contents = []
+            for doc in documents:
+                content = doc.page_content.strip()
+                if content:
+                    document_contents.append(content)
+
+            context = "\n\n".join(document_contents)
             
-            chat_chain = ConversationalRetrievalChain.from_llm(
-                llm=llm,
-                retriever=vector_store.vector_store.as_retriever(),
-                return_source_documents=True
-            )
-            
-            response = await chat_chain.ainvoke({
-                "question": request.message,
-                "chat_history": conversation.messages
-            })
-            answer = response.content
+            enhanced_prompt = f"""Tu es un assistant précis et direct.
+
+Document analysé : {request.documents[0]}
+Contenu du document :
+{context}
+
+Question : {request.message}
+
+Instructions :
+1. Décris exactement ce qu'est ce fichier (type, nom, contenu principal)
+2. Résume brièvement les informations principales qu'il contient
+3. Si tu ne peux pas lire certaines parties, indique-le clairement
+
+Réponds en français de manière concise et structurée."""
+
+            response = await llm.ainvoke(enhanced_prompt)
+            return {"response": response}
         else:
-            # Sans RAG - utilisation directe du LLM avec historique
-            response = await llm.ainvoke(full_prompt)
-            answer = response
-
-        # Mettre à jour la conversation
-        conversation.add_message("user", request.message)
-        conversation.add_message("assistant", answer)
-        conversation_store.save_conversation(conversation)
-
-        return {
-            "response": answer,
-            "conversation_id": conversation.id,
-            "rag_used": request.use_rag
-        }
+            response = await llm.ainvoke(request.message)
+            return {"response": response}
 
     except Exception as e:
-        logger.error(f"Erreur lors du chat: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+        logger.error(f"Erreur lors du chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str):

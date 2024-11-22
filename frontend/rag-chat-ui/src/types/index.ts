@@ -20,4 +20,6 @@ export interface LLMSettings {
     topP: number;
     frequencyPenalty: number;
     presencePenalty: number;
+    useRag?: boolean;
+    documents?: string[];
 }

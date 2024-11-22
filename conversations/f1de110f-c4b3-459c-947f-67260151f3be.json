@@ -1,0 +1,12 @@
+[
+  {
+    "role": "user",
+    "content": "salut ca va tu peu me repondre en francais ",
+    "timestamp": "2024-11-22T16:47:08.815980"
+  },
+  {
+    "role": "assistant",
+    "content": "Bonjour! *adjusts glasses* Of course, I'd be happy to respond in French. Comment allez-vous aujourd'hui?",
+    "timestamp": "2024-11-22T16:47:08.816071"
+  }
+]

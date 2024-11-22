@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, TextField, Button, Paper, Typography, CircularProgress, IconButton, FormControlLabel, Switch, Drawer, List, ListItem, ListItemText, Snackbar, Alert, Slider } from '@mui/material';
+import { Box, TextField, Button, Paper, Typography, CircularProgress, IconButton, FormControlLabel, Switch, Drawer, List, ListItem, ListItemText, Snackbar, Alert, Slider, Checkbox, Chip } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
@@ -16,7 +16,7 @@ export const ChatWindow: React.FC = () => {
     const [input, setInput] = useState('');
     const messagesEndRef = useRef<null | HTMLDivElement>(null);
     const [loading, setLoading] = useState(false);
-    const [ragEnabled, setRagEnabled] = useState(true);
+    const [useRag, setUseRag] = useState(false);
     const [llmSettings, setLLMSettings] = useState<LLMSettingsType>({
         temperature: 0.7,
         maxTokens: 2000,
@@ -28,9 +28,8 @@ export const ChatWindow: React.FC = () => {
     const [documents, setDocuments] = useState<Array<{ name: string; size: number }>>([]);
     const [uploading, setUploading] = useState(false);
     const [uploadError, setUploadError] = useState<string | null>(null);
-    const [message, setMessage] = useState('');
-    const [useRag, setUseRag] = useState(false);
     const [temperature, setTemperature] = useState(0.7);
+    const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -38,7 +37,9 @@ export const ChatWindow: React.FC = () => {
 
     useEffect(() => {
         if (conversationId) {
-            setLoading(true);
+            setDocuments([]);
+            setUseRag(false);
+            setMessages([]);
             chatService.getConversation(conversationId)
                 .then(data => {
                     if (Array.isArray(data)) {
@@ -63,6 +64,12 @@ export const ChatWindow: React.FC = () => {
 
         try {
             setLoading(true);
+            
+            if (useRag && selectedDocuments.length === 0) {
+                setUploadError("Veuillez sélectionner au moins un document quand RAG est activé");
+                return;
+            }
+
             const userMessage: Message = {
                 role: 'user',
                 content: input,
@@ -71,7 +78,13 @@ export const ChatWindow: React.FC = () => {
             setMessages(prev => [...prev, userMessage]);
             setInput('');
 
-            const response = await chatService.sendMessage(input, conversationId, llmSettings);
+            const response = await chatService.sendMessage({
+                message: input,
+                conversation_id: conversationId,
+                temperature: temperature,
+                use_rag: useRag,
+                documents: useRag ? selectedDocuments : []
+            });
             
             const assistantMessage: Message = {
                 role: 'assistant',
@@ -94,7 +107,12 @@ export const ChatWindow: React.FC = () => {
             const formData = new FormData();
             
             for (let i = 0; i < event.target.files.length; i++) {
-                formData.append('files', event.target.files[i]);
+                const file = event.target.files[i];
+                if (!file.name.match(/\.(pdf|txt|doc|docx)$/i)) {
+                    setUploadError("Type de fichier non supporté. Types acceptés: PDF, TXT, DOC, DOCX");
+                    continue;
+                }
+                formData.append('files', file);
             }
 
             const response = await fetch('http://localhost:8000/api/documents/upload', {
@@ -107,28 +125,28 @@ export const ChatWindow: React.FC = () => {
                 throw new Error(errorData.detail || 'Upload failed');
             }
 
-            const uploadResult = await response.json();
-            console.log('Upload result:', uploadResult);
-
-            // Rafraîchir la liste des documents
-            const listResponse = await fetch('http://localhost:8000/api/documents/list');
-            if (!listResponse.ok) {
-                throw new Error('Failed to fetch updated document list');
-            }
-            const data = await listResponse.json();
-            setDocuments(data.documents || []);
+            await loadDocuments();
             
-            // Ouvrir le drawer après un upload réussi
             setIsDocumentDrawerOpen(true);
         } catch (error: any) {
             console.error('Upload error:', error);
             setUploadError(error.message || 'Failed to upload document');
         } finally {
             setUploading(false);
-            // Réinitialiser l'input file
             if (event.target) {
                 event.target.value = '';
             }
+        }
+    };
+
+    const loadDocuments = async () => {
+        try {
+            const response = await fetch('http://localhost:8000/api/documents/list');
+            if (!response.ok) throw new Error('Failed to fetch documents');
+            const data = await response.json();
+            setDocuments(data.documents || []);
+        } catch (error) {
+            console.error('Error loading documents:', error);
         }
     };
 
@@ -295,7 +313,22 @@ export const ChatWindow: React.FC = () => {
 
                     <List>
                         {documents.map((doc) => (
-                            <ListItem key={doc.name}>
+                            <ListItem 
+                                key={doc.name}
+                                secondaryAction={
+                                    <Checkbox
+                                        edge="end"
+                                        checked={selectedDocuments.includes(doc.name)}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                setSelectedDocuments(prev => [...prev, doc.name]);
+                                            } else {
+                                                setSelectedDocuments(prev => prev.filter(name => name !== doc.name));
+                                            }
+                                        }}
+                                    />
+                                }
+                            >
                                 <ListItemText
                                     primary={doc.name}
                                     secondary={`${(doc.size / 1024).toFixed(2)} KB`}
@@ -335,6 +368,16 @@ export const ChatWindow: React.FC = () => {
                     step={0.1}
                     sx={{ width: 200 }}
                 />
+            </Box>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                {selectedDocuments.map(doc => (
+                    <Chip
+                        key={doc}
+                        label={doc}
+                        onDelete={() => setSelectedDocuments(prev => prev.filter(name => name !== doc))}
+                        size="small"
+                    />
+                ))}
             </Box>
         </Box>
     );

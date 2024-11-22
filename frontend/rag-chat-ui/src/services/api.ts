@@ -1,15 +1,19 @@
 import axios from 'axios';
-import { ChatResponse, LLMSettings } from '../types';
+import { ChatResponse } from '../types';
 
 const API_URL = 'http://localhost:8000/api';
 
+interface ChatParams {
+    message: string;
+    conversation_id?: string;
+    temperature: number;
+    use_rag: boolean;
+    documents: string[];
+}
+
 export const chatService = {
-    sendMessage: async (message: string, conversationId?: string, settings?: LLMSettings): Promise<ChatResponse> => {
-        const response = await axios.post(`${API_URL}/chat`, {
-            message,
-            conversation_id: conversationId,
-            settings
-        });
+    sendMessage: async (params: ChatParams): Promise<ChatResponse> => {
+        const response = await axios.post(`${API_URL}/chat`, params);
         return response.data;
     },
 

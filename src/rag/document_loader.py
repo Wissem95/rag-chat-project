@@ -4,6 +4,12 @@ from typing import List
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import io
 import logging
+from langchain_community.document_loaders import TextLoader, PyPDFLoader, DirectoryLoader, PDFPlumberLoader
+from langchain.schema import Document
+import shutil
+from fastapi import UploadFile
+from pypdf import PdfReader
+import pdfplumber
 
 logger = logging.getLogger(__name__)
 
@@ -74,21 +80,84 @@ class MinioStorage:
 
 class DocumentLoader:
     def __init__(self):
-        self.storage = MinioStorage()
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len,
-            separators=["\n\n", "\n", " ", ""]
-        )
+        self.storage = os.path.join(os.getcwd(), "documents")
+        os.makedirs(self.storage, exist_ok=True)
 
-    async def load_documents_from_storage(self) -> List[str]:
-        documents = await self.storage.get_documents()
-        split_docs = []
-        for doc in documents:
-            splits = self.text_splitter.split_text(doc['content'])
-            split_docs.extend(splits)
-        return split_docs
+    async def upload_document(self, file: UploadFile) -> dict:
+        """Upload un document et retourne ses informations"""
+        try:
+            file_path = os.path.join(self.storage, file.filename)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            return {
+                "name": file.filename,
+                "size": os.path.getsize(file_path)
+            }
+        except Exception as e:
+            print(f"Error uploading {file.filename}: {str(e)}")
+            raise e
 
-    def upload_document(self, file_name: str, content: str) -> bool:
-        return self.storage.upload_document(file_name, content)
+    async def list_documents(self) -> List[dict]:
+        """Liste tous les documents disponibles"""
+        try:
+            documents = []
+            for filename in os.listdir(self.storage):
+                if filename.lower().endswith(('.txt', '.pdf', '.doc', '.docx')):
+                    file_path = os.path.join(self.storage, filename)
+                    documents.append({
+                        "name": filename,
+                        "size": os.path.getsize(file_path)
+                    })
+            return documents
+        except Exception as e:
+            print(f"Error listing documents: {str(e)}")
+            raise e
+
+    async def load_documents(self, filenames: List[str]) -> List[Document]:
+        documents = []
+        for filename in filenames:
+            file_path = os.path.join(self.storage, filename)
+            logger.info(f"Tentative de lecture du fichier: {file_path}")
+            
+            if not os.path.exists(file_path):
+                logger.warning(f"Fichier non trouvé: {file_path}")
+                continue
+
+            try:
+                if filename.lower().endswith('.pdf'):
+                    # Essayer avec pdfplumber
+                    with pdfplumber.open(file_path) as pdf:
+                        text = ""
+                        for page in pdf.pages:
+                            page_text = page.extract_text()
+                            if page_text:
+                                text += page_text + "\n"
+                        
+                        if text.strip():
+                            logger.info(f"Contenu extrait du PDF: {text[:100]}...")  # Log des premiers caractères
+                            documents.append(Document(
+                                page_content=text,
+                                metadata={
+                                    "source": filename,
+                                    "type": "pdf"
+                                }
+                            ))
+                            logger.info(f"PDF chargé avec succès: {filename}")
+                        else:
+                            # Si pdfplumber échoue, essayer PyPDFLoader
+                            logger.info("Tentative avec PyPDFLoader...")
+                            loader = PyPDFLoader(file_path)
+                            pdf_docs = loader.load()
+                            if pdf_docs:
+                                documents.extend(pdf_docs)
+                                logger.info(f"PDF chargé avec PyPDFLoader: {filename}")
+                            else:
+                                logger.warning(f"PDF illisible avec les deux méthodes: {filename}")
+                
+            except Exception as e:
+                logger.error(f"Erreur lors du chargement de {filename}: {str(e)}")
+                logger.exception(e)  # Log complet de l'erreur
+
+        logger.info(f"Nombre total de documents chargés: {len(documents)}")
+        return documents
